@@ -485,30 +485,47 @@ class PdZppHJFxW4lidr7 {
     }
 
     _vlookupExact(lookupValue, sheetName, firstCol, lastCol, startRow, endRow, returnColIndex) {
-        // columns in range => e.g. D..F => we’ll build an array ["D","E","F"]
+        // Build an array of column letters from firstCol to lastCol.
         let cols = [];
         let startCode = firstCol.charCodeAt(0);
-        let endCode   = lastCol.charCodeAt(0);
+        let endCode = lastCol.charCodeAt(0);
         for (let c = startCode; c <= endCode; c++) {
             cols.push(String.fromCharCode(c));
         }
-        // The "lookup" col is cols[0]. The "return" col is cols[returnColIndex-1].
+
+        // Determine the lookup column (first column) and the return column.
         let lookupColumn = cols[0];
         let retCol = cols[returnColIndex - 1];
-        if (!retCol) return null;
+        if (!retCol) return 0; // Return 0 if the return column is invalid.
 
-        for (let row = startRow; row<=endRow; row++) {
-            let lookupCellVal = this.getValue(sheetName, `${lookupColumn}${row}`);
-            if (lookupCellVal == null) break;
-            // exact match
-            if (parseFloat(lookupCellVal) === lookupValue) {
-                // return the "retCol" cell
+        // Define a small tolerance to allow for floating point imprecision.
+        const tolerance = 1e-10;
+
+        // Iterate through the specified rows.
+        for (let row = startRow; row <= endRow; row++) {
+            let cellAddress = `${lookupColumn}${row}`;
+            let lookupCellVal = this.getValue(sheetName, cellAddress);
+
+            // Skip this row if the lookup cell is null/undefined.
+            if (lookupCellVal == null) continue;
+
+            // Try to convert the lookup cell to a number.
+            let parsedVal = parseFloat(lookupCellVal);
+            if (isNaN(parsedVal)) continue;
+
+            // Compare using tolerance.
+            if (Math.abs(parsedVal - lookupValue) < tolerance) {
+                // If a match is found, get the return cell's value.
                 let returnVal = this.getValue(sheetName, `${retCol}${row}`);
-                return returnVal;
+                // Attempt to parse the return value to a number; if not possible, return it as-is.
+                let parsedReturn = parseFloat(returnVal);
+                return isNaN(parsedReturn) ? returnVal : parsedReturn;
             }
         }
-        return null;
+        // If no match is found, return 0.
+        return 0;
     }
+
 
     _excelEdate(startDate, months) {
         if (!(startDate instanceof Date) || isNaN(startDate.valueOf())) {
@@ -664,16 +681,26 @@ class PdZppHJFxW4lidr7 {
 
 
     getDValueForRow(rowNum) {
-        let prevD = parseFloat(this.getValue("15yrlump", `D${rowNum - 1}`) || 0);
-        return prevD + 1;
+        if (rowNum === 50){
+            let currDt = this._staticValues.get("15yrlump,F5")
+            return currDt.getFullYear()
+        } else {
+            let prevD = parseFloat(this.getValue("15yrlump", `D${rowNum - 1}`) || 0);
+            return prevD + 1;
+        }
     }
 
     /**
      *  read E(row-1), add 1
      */
     getEValueForRow(rowNum) {
-        let prevE = parseFloat(this.getValue("15yrlump", `E${rowNum - 1}`) || 0);
-        return prevE + 1;
+        if (rowNum === 50){
+            return this.getValue("15yrlump", "F13")
+        } else {
+            let prevE = parseFloat(this.getValue("15yrlump", `E${rowNum - 1}`) || 0);
+            return prevE + 1;
+        }
+
     }
 
     /**
@@ -703,20 +730,41 @@ class PdZppHJFxW4lidr7 {
      *  J(row) = ROUND((H(row) + L(row-1)) * (1 + I(row)/(1 - I(row)))^(1/12)^12 - (H(row) + L(row-1)), E6)
      */
     getJValueForRow(rowNum) {
-        let hVal = parseFloat(this.getValue("15yrlump", `H${rowNum}`) || 0);
-        let lPrev = parseFloat(this.getValue("15yrlump", `L${rowNum - 1}`) || 0);
-        let iVal = parseFloat(this.getValue("15yrlump", `I${rowNum}`) || 0);
-        let digits = parseInt(this.getValue("param15yrlump", "E6") || 0, 10);
-
-        if (Math.abs(1 - iVal) < 1e-12) {
-            // avoid division by zero
-            return 0;
+        if (rowNum === 50){
+            let h50 = parseFloat(this.getValue("15yrlump", `H${rowNum}`) || 0);
+            let i50 = parseFloat(this.getValue("15yrlump", `I${rowNum}`) || 0);
+            let digits = parseInt(this.getValue("param15yrlump", "E6") || 0, 10);
+            let base;
+            if (Math.abs(1 - i50) > 1e-12) {
+                // avoid division by zero
+                base = 1 + i50 / (1 - i50);
+            }  else {
+                base = 1e9
+            }
+            let monthly = Math.pow(base, 1 / 12);
+            let finalFactor = Math.pow(monthly, 12);
+            let expr = (h50 * finalFactor) - h50;
+            let val = this._excelRound(expr, digits);
+            return val
+        } else {
+            let hVal = parseFloat(this.getValue("15yrlump", `H${rowNum}`) || 0);
+            let lPrev = parseFloat(this.getValue("15yrlump", `L${rowNum - 1}`) || 0);
+            let iVal = parseFloat(this.getValue("15yrlump", `I${rowNum}`) || 0);
+            let digits = parseInt(this.getValue("param15yrlump", "E6") || 0, 10);
+            let base;
+            if (Math.abs(1 - iVal) < 1e-12) {
+                // avoid division by zero
+                base = 1e9
+            }  else {
+                base = 1 + iVal / (1 - iVal);
+            }
+            let monthly = Math.pow(base, 1 / 12);
+            let finalFactor = Math.pow(monthly, 12);
+            let expr = (hVal + lPrev) * finalFactor - (hVal + lPrev);
+            let val = this._excelRound(expr, digits);
+            return val
         }
-        let base = 1 + iVal / (1 - iVal);
-        let monthly = Math.pow(base, 1 / 12);
-        let finalFactor = Math.pow(monthly, 12);
-        let expr = (hVal + lPrev) * finalFactor - (hVal + lPrev);
-        return this._excelRound(expr, digits);
+
     }
 
     /**
@@ -737,10 +785,18 @@ class PdZppHJFxW4lidr7 {
      *  L(row) = H(row) + J(row) + L(row-1)
      */
     getLValueForRow(rowNum) {
-        let hVal = parseFloat(this.getValue("15yrlump", `H${rowNum}`) || 0);
-        let jVal = parseFloat(this.getValue("15yrlump", `J${rowNum}`) || 0);
-        let lPrev = parseFloat(this.getValue("15yrlump", `L${rowNum - 1}`) || 0);
-        return hVal + jVal + lPrev;
+        if (rowNum === 50) {
+            let hVal = parseFloat(this.getValue("15yrlump", `H${rowNum}`) || 0);
+            let kVal = parseFloat(this.getValue("15yrlump", `K${rowNum}`) || 0);
+
+            return hVal + kVal;
+        } else {
+            let hVal = parseFloat(this.getValue("15yrlump", `H${rowNum}`) || 0);
+            let jVal = parseFloat(this.getValue("15yrlump", `J${rowNum}`) || 0);
+            let lPrev = parseFloat(this.getValue("15yrlump", `L${rowNum - 1}`) || 0);
+
+            return hVal + jVal + lPrev;
+        }
     }
 
     /**
@@ -845,7 +901,8 @@ class PdZppHJFxW4lidr7 {
     sheet_15yrlump_F27() {
         let valF13 = parseFloat(this.getValue("15yrlump", "F13") || 0);
         // we do an exact VLOOKUP on param15yrlump D13..F68 => returning col2 => 'E'
-        return this._vlookupExact(valF13, "param15yrlump", "D", "F", 13, 68, 2);
+        let vlookupMatch = this._vlookupExact(valF13, "param15yrlump", "D", "F", 13, 68, 2);
+        return vlookupMatch
     }
 
 // =F27 * Xinput_wozwaarde
@@ -1032,7 +1089,8 @@ class PdZppHJFxW4lidr7 {
      *  D50..D79
      ********************************************************************/
     sheet_15yrlump_D50() {
-        return this.getDValueForRow(50);
+        let val = this.getDValueForRow(50);
+        return val
     }
     sheet_15yrlump_D51() {
         return this.getDValueForRow(51);
@@ -1126,7 +1184,8 @@ class PdZppHJFxW4lidr7 {
      *  E50..E79
      ********************************************************************/
     sheet_15yrlump_E50() {
-        return this.getEValueForRow(50);
+        let val = this.getEValueForRow(50);
+        return val
     }
     sheet_15yrlump_E51() {
         return this.getEValueForRow(51);
@@ -1220,7 +1279,8 @@ class PdZppHJFxW4lidr7 {
      *  F50..F79
      ********************************************************************/
     sheet_15yrlump_F50() {
-        return this.getFValueForRow(50);
+        let val = this.getFValueForRow(50);
+        return val
     }
     sheet_15yrlump_F51() {
         return this.getFValueForRow(51);
@@ -1356,6 +1416,7 @@ class PdZppHJFxW4lidr7 {
         return this.getGValueForRow(63);
     }
     sheet_15yrlump_G64() {
+        let val = this.getGValueForRow(64);
         return this.getGValueForRow(64);
     }
     sheet_15yrlump_G65() {
@@ -1408,7 +1469,8 @@ class PdZppHJFxW4lidr7 {
      *  I50..I79
      ********************************************************************/
     sheet_15yrlump_I50() {
-        return this.getIValueForRow(50);
+        let val = this.getIValueForRow(50);
+        return val
     }
     sheet_15yrlump_I51() {
         return this.getIValueForRow(51);
@@ -1502,7 +1564,8 @@ class PdZppHJFxW4lidr7 {
      *  J50..J79
      ********************************************************************/
     sheet_15yrlump_J50() {
-        return this.getJValueForRow(50);
+        let val = this.getJValueForRow(50);
+        return val
     }
     sheet_15yrlump_J51() {
         return this.getJValueForRow(51);
@@ -1596,7 +1659,8 @@ class PdZppHJFxW4lidr7 {
      *  K50..K79
      ********************************************************************/
     sheet_15yrlump_K50() {
-        return this.getKValueForRow(50);
+        let val = this.getKValueForRow(50);
+        return val
     }
     sheet_15yrlump_K51() {
         return this.getKValueForRow(51);
@@ -1690,7 +1754,8 @@ class PdZppHJFxW4lidr7 {
      *  L50..L79
      ********************************************************************/
     sheet_15yrlump_L50() {
-        return this.getLValueForRow(50);
+        let val = this.getLValueForRow(50);
+        return val
     }
     sheet_15yrlump_L51() {
         return this.getLValueForRow(51);
@@ -1732,7 +1797,8 @@ class PdZppHJFxW4lidr7 {
         return this.getLValueForRow(63);
     }
     sheet_15yrlump_L64() {
-        return this.getLValueForRow(64);
+        let val = this.getLValueForRow(64);
+        return val
     }
     sheet_15yrlump_L65() {
         return this.getLValueForRow(65);
@@ -1784,7 +1850,8 @@ class PdZppHJFxW4lidr7 {
      *  M50..M79
      ********************************************************************/
     sheet_15yrlump_M50() {
-        return this.getMValueForRow(50);
+        let val = this.getMValueForRow(50);
+        return val
     }
     sheet_15yrlump_M51() {
         return this.getMValueForRow(51);
@@ -1826,7 +1893,8 @@ class PdZppHJFxW4lidr7 {
         return this.getMValueForRow(63);
     }
     sheet_15yrlump_M64() {
-        return this.getMValueForRow(64);
+        let val = this.getMValueForRow(64);
+        return val
     }
     sheet_15yrlump_M65() {
         return this.getMValueForRow(65);
@@ -1881,7 +1949,8 @@ class PdZppHJFxW4lidr7 {
      *  or we can call getNValueForRow(rowNum).
      ********************************************************************/
     sheet_15yrlump_N50() {
-        return this.getNValueForRow(50);
+        let val = this.getNValueForRow(50);
+        return val
     }
     sheet_15yrlump_N51() {
         return this.getNValueForRow(51);
@@ -1975,8 +2044,22 @@ class PdZppHJFxW4lidr7 {
 
 
     _excelRound(value, digits) {
-        let factor = Math.pow(10, digits);
-        return Math.round(value * factor) / factor;
+        // let factor = Math.pow(10, digits);
+        // return Math.round(value * factor) / factor;
+
+        const factor = Math.pow(10, digits);
+        const shiftedValue = value * factor;
+        const roundedValue = Math.floor(shiftedValue + 0.5);
+
+        // Check if it was exactly .5 and apply Bankers' Rounding
+        if (Math.abs(shiftedValue - roundedValue) === 0.5) {
+            // Round to the nearest even number
+            return (Math.floor(shiftedValue) % 2 === 0)
+                ? Math.floor(shiftedValue) / factor
+                : Math.ceil(shiftedValue) / factor;
+        }
+
+        return roundedValue / factor;
     }
 
     _calculate_formula_method_map(){
@@ -2116,58 +2199,151 @@ class PdZppHJFxW4lidr7 {
         }
     }
 
+    // lump15yrls_linear() {
+    //     // Initial recalc to sync up values.
+    //     this.calculate();
+    //     const prv_dbl_Max_Mortgage = 550000;
+    //
+    //     // Partner logic
+    //     let g2 = this.Xinput_geboortedatumaanvrager2();
+    //     if (g2 && g2 instanceof Date && g2.getFullYear() > 1924) {
+    //         this.setValue("15yrlump", "F9", "Ja");
+    //     } else {
+    //         this.setValue("15yrlump", "F9", "Nee");
+    //     }
+    //
+    //     // Mortgage logic
+    //     let saldo = this.Xinput_hypotheeksaldo() || 0;
+    //     if (saldo > 0) {
+    //         this.setValue("15yrlump", "F17", "Ja");
+    //     } else {
+    //         this.setValue("15yrlump", "F17", "Nee");
+    //     }
+    //
+    //     // Fill F50..F79 with Xinput_wozwaarde
+    //     let wozVal = this.Xinput_wozwaarde();
+    //     for (let row = 50; row < 80; row++) {
+    //         this.setValue("15yrlump", "F" + row, wozVal);
+    //     }
+    //
+    //     // Optional: checks for total loan and payout – omitted here
+    //
+    //     let dblGoalSeek = Math.round(this.getValue("15yrlump", "F28") || 0);
+    //     let dblMinAnnPay = this.getValue("15yrlump", "F31") || 0;
+    //     for (let row = 51; row < 65; row++) {
+    //         this.setValue("15yrlump", "H" + row, dblMinAnnPay);
+    //     }
+    //     let init_h50 = this.getValue("15yrlump", "F36") || 0;
+    //     this.setValue("15yrlump", "H50", init_h50);
+    //     this.calculate();
+    //
+    //     // Define _diff to log H50 and rngTotal differences.
+    //     const _diff = (x) => {
+    //         this.setValue("15yrlump", "H50", x);
+    //         this.calculate();
+    //         let rt = this.rngTotal() || 0;
+    //         console.log(`_diff(${x}): H50=${this._staticValues.get("15yrlump,H50")} rngTotal=${rt} goal=${dblGoalSeek} diff=${rt - dblGoalSeek}`);
+    //         return rt - dblGoalSeek;
+    //     };
+    //
+    //     // Measure at x0 and x1
+    //     let x0 = init_h50;
+    //     let f0 = _diff(x0);
+    //     let x1 = init_h50 + 100;
+    //     let f1 = _diff(x1);
+    //     let slope = (Math.abs(x1 - x0) > 1e-15) ? ((f1 - f0) / (x1 - x0)) : null;
+    //     let final_h50;
+    //     if (slope === null || Math.abs(slope) < 1e-15) {
+    //         final_h50 = init_h50;
+    //     } else {
+    //         final_h50 = x0 - (f0 / slope);
+    //     }
+    //     console.log("Final H50 computed:", final_h50);
+    //
+    //     this.setValue("15yrlump", "H50", final_h50);
+    //     this.calculate();
+    //     console.log("After final recalc, rngTotal:", this.rngTotal());
+    //
+    //     let dblTotalMortgage = Math.round(this.getValue("15yrlump", "L64") || 0);
+    //     if (dblTotalMortgage > prv_dbl_Max_Mortgage) {
+    //         // (Optional second pass if needed)
+    //     }
+    // }
+
     lump15yrls_linear() {
         // Initial recalc to sync up values.
         this.calculate();
         const prv_dbl_Max_Mortgage = 550000;
 
-        // Partner logic
+        // Partner logic: if the second applicant’s birthdate exists and its year is > 1924, then set partner to "Ja"
         let g2 = this.Xinput_geboortedatumaanvrager2();
         if (g2 && g2 instanceof Date && g2.getFullYear() > 1924) {
-            this.setValue("15yrlump", "F9", "Ja");
+            this.setValue("15yrlump", "Xinput_partnerjanee", "Ja");
         } else {
-            this.setValue("15yrlump", "F9", "Nee");
+            this.setValue("15yrlump", "Xinput_partnerjanee", "Nee");
         }
 
-        // Mortgage logic
+        // Mortgage logic: if the hypotheeksaldo is > 0, mark it as "Ja"
         let saldo = this.Xinput_hypotheeksaldo() || 0;
         if (saldo > 0) {
-            this.setValue("15yrlump", "F17", "Ja");
+            this.setValue("15yrlump", "Xinput_hypotheeksaldo", "Ja");
         } else {
-            this.setValue("15yrlump", "F17", "Nee");
+            this.setValue("15yrlump", "Xinput_hypotheeksaldo", "Nee");
         }
 
-        // Fill F50..F79 with Xinput_wozwaarde
+        // Fill F50..F79 with the WOZ value.
         let wozVal = this.Xinput_wozwaarde();
         for (let row = 50; row < 80; row++) {
             this.setValue("15yrlump", "F" + row, wozVal);
         }
 
-        // Optional: checks for total loan and payout – omitted here
+        // Calculate total loan and compare with cap (optional, no action taken here)
+        let rngTotal_val = this.rngTotal();
+        let dblTotalLoan = saldo + (rngTotal_val || 0);
+        let limit_e8 = this.getValue("param15yrlump", "E8") || 99999999;
+        if (dblTotalLoan > limit_e8) {
+            // (Optional handling)
+        }
 
+        // Sum H50 to H64 and compare with a minimum payout (optional)
+        let sum_h50_h64 = 0;
+        for (let r = 50; r < 65; r++) {
+            sum_h50_h64 += this.getValue("15yrlump", "H" + r) || 0;
+        }
+        let min_e9 = this.getValue("param15yrlump", "E9") || 0;
+        if (sum_h50_h64 < min_e9) {
+            // (Optional handling)
+        }
+
+        // Get the goal seek target and the minimum annual payment.
         let dblGoalSeek = Math.round(this.getValue("15yrlump", "F28") || 0);
         let dblMinAnnPay = this.getValue("15yrlump", "F31") || 0;
+
+        // Set H51..H64 to the minimum annual payment.
         for (let row = 51; row < 65; row++) {
             this.setValue("15yrlump", "H" + row, dblMinAnnPay);
         }
+
+        // Get the initial H50 value from F36, set H50, and recalc.
         let init_h50 = this.getValue("15yrlump", "F36") || 0;
         this.setValue("15yrlump", "H50", init_h50);
         this.calculate();
 
-        // Define _diff to log H50 and rngTotal differences.
+        // Define a helper function _diff that updates H50, recalculates, and returns the difference (rngTotal - goal).
         const _diff = (x) => {
             this.setValue("15yrlump", "H50", x);
             this.calculate();
-            let rt = this.rngTotal() || 0;
-            // console.log(`_diff(${x}): H50=${this._staticValues.get("15yrlump,H50")} rngTotal=${rt} goal=${dblGoalSeek} diff=${rt - dblGoalSeek}`);
-            return rt - dblGoalSeek;
+            // console.log(`_diff(${x}): H50 =${this._staticValues.get("15yrlump,H50")} rngTotal =${this.rngTotal()} goal =${dblGoalSeek} diff =${this.rngTotal() - dblGoalSeek}`);
+            return (this.rngTotal() || 0) - dblGoalSeek;
         };
 
-        // Measure at x0 and x1
+        // Measure difference at the initial H50 (x0) and at x0 + 100.
         let x0 = init_h50;
         let f0 = _diff(x0);
         let x1 = init_h50 + 100;
         let f1 = _diff(x1);
+
+        // Compute the slope and solve for the H50 that zeroes the difference.
         let slope = (Math.abs(x1 - x0) > 1e-15) ? ((f1 - f0) / (x1 - x0)) : null;
         let final_h50;
         if (slope === null || Math.abs(slope) < 1e-15) {
@@ -2175,18 +2351,19 @@ class PdZppHJFxW4lidr7 {
         } else {
             final_h50 = x0 - (f0 / slope);
         }
+
         // console.log("Final H50 computed:", final_h50);
 
+        // Set H50 to the computed value and recalc.
         this.setValue("15yrlump", "H50", final_h50);
         this.calculate();
-        // console.log("After final recalc, rngTotal:", this.rngTotal());
 
+        // Optionally check total mortgage versus the maximum allowed (not refined here).
         let dblTotalMortgage = Math.round(this.getValue("15yrlump", "L64") || 0);
         if (dblTotalMortgage > prv_dbl_Max_Mortgage) {
-            // (Optional second pass if needed)
+            // (Optional second pass)
         }
     }
-
 
 
 
